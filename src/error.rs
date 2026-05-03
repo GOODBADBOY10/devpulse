@@ -1,13 +1,18 @@
 use thiserror::Error;
 
+/// All errors devpulse can produce.
+/// Variants marked #[allow(dead_code)] are defined for future commands
+/// (todos --filter, context --diff) and will be used in upcoming steps.
 #[derive(Debug, Error)]
 pub enum DevpulseError {
+    #[allow(dead_code)]
     #[error("Failed to spawn process '{binary}': {source}")]
     ProcessSpawn {
         binary: String,
         source: std::io::Error,
     },
 
+    #[allow(dead_code)]
     #[error("Process '{binary}' produced invalid UTF-8 output")]
     InvalidUtf8 { binary: String },
 
@@ -17,6 +22,7 @@ pub enum DevpulseError {
     #[error("Failed to determine home directory")]
     NoHomeDir,
 
+    #[allow(dead_code)]
     #[error("Not a git repository")]
     NotAGitRepo,
 
