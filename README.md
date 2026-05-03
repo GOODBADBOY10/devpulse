@@ -82,8 +82,8 @@ cargo install devpulse
 ### From source
 
 ```bash
-git clone https://github.com/GOODBADBOY10/selfman.git
-cd selfman
+git clone https://github.com/GOODBADBOY10/devpulse.git
+cd devpulse
 cargo install --path .
 ```
 
@@ -302,8 +302,8 @@ Contributions are welcome! Please open an issue first to discuss what you'd like
 
 ```bash
 # Clone and build
-git clone https://github.com/GOODBADBOY10/selfman
-cd selfman
+git clone https://github.com/GOODBADBOY10/devpulse.git
+cd devpulse
 cargo build
 
 # Run with debug logs
