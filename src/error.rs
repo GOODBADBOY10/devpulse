@@ -1,8 +1,5 @@
 use thiserror::Error;
 
-/// All errors that devpulse can produce.
-/// Using thiserror gives us Display + Error implementations for free,
-/// and makes every failure case explicit and matchable.
 #[derive(Debug, Error)]
 pub enum DevpulseError {
     #[error("Failed to spawn process '{binary}': {source}")]
@@ -19,7 +16,12 @@ pub enum DevpulseError {
 
     #[error("Failed to determine home directory")]
     NoHomeDir,
+
+    #[error("Not a git repository")]
+    NotAGitRepo,
+
+    #[error("Failed to parse session data: {0}")]
+    SessionParse(#[from] serde_json::Error),
 }
 
-/// Convenience alias — callers write `Result<T>` instead of `Result<T, DevpulseError>`
 pub type Result<T> = std::result::Result<T, DevpulseError>;
