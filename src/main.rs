@@ -28,6 +28,9 @@ enum Commands {
         #[arg(default_value = ".")]
         path: String,
     },
+
+    /// Show context for the current project
+    Context,
 }
 
 fn main() {
@@ -41,6 +44,7 @@ fn main() {
     let result = match cli.command {
         Commands::Health => commands::health::run(),
         Commands::Todos { path } => commands::todos::run(&path),
+        Commands::Context => commands::context::run(),
     };
 
     if let Err(e) = result {
