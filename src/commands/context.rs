@@ -9,18 +9,15 @@ use tracing::{debug, info, instrument, warn};
 
 // ─── Data structures ────────────────────────────────────────────────────────
 
-/// Everything we know about the current project session.
-/// Derives Serialize/Deserialize so serde_json can save/load it automatically.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProjectSession {
     pub project_name: String,
     pub project_path: String,
-    pub last_seen: String,       // ISO 8601 timestamp
+    pub last_seen: String,
     pub git: Option<GitContext>,
     pub todo_count: Option<usize>,
 }
 
-/// Git state captured at session save time.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GitContext {
     pub branch: String,
@@ -29,7 +26,7 @@ pub struct GitContext {
     pub last_commit_author: String,
 }
 
-// ─── Entry point ────────────────────────────────────────────────────────────
+// ─── Entry point ─────────────────────────────────────────────────────────────
 
 #[instrument(name = "context_show")]
 pub fn run() -> Result<()> {
@@ -40,31 +37,24 @@ pub fn run() -> Result<()> {
     println!("\n{}", "devpulse context".bold().underline());
     println!("{}\n", format!("Project: {}", cwd.display()).dimmed());
 
-    // Gather everything about the current project
     let git = gather_git_context(&cwd);
     let todo_count = count_todos(&cwd);
     let session = build_session(&cwd, git, todo_count)?;
 
-    // Save the session to ~/.devpulse/<project>.json
     save_session(&session)?;
-
-    // Print it all out
     print_context(&session);
 
     info!(project = %session.project_name, "Context captured");
     Ok(())
 }
 
-// ─── Git ────────────────────────────────────────────────────────────────────
+// ─── Git ─────────────────────────────────────────────────────────────────────
 
-/// Run git commands to gather branch, changes, and last commit info.
-/// Returns None gracefully if we're not in a git repo — not an error.
 #[instrument(skip(cwd))]
 fn gather_git_context(cwd: &PathBuf) -> Option<GitContext> {
     let branch = run_git(&["rev-parse", "--abbrev-ref", "HEAD"], cwd)?;
     debug!(branch = %branch, "Got git branch");
 
-    // Count uncommitted changes (staged + unstaged)
     let status_output = run_git(&["status", "--porcelain"], cwd)?;
     let uncommitted_changes = if status_output.is_empty() {
         0
@@ -72,19 +62,11 @@ fn gather_git_context(cwd: &PathBuf) -> Option<GitContext> {
         status_output.lines().count()
     };
 
-    // Get the last commit message
-    let last_commit_message = run_git(
-        &["log", "-1", "--pretty=format:%s"],
-        cwd,
-    )
-    .unwrap_or_else(|| "No commits yet".to_string());
+    let last_commit_message = run_git(&["log", "-1", "--pretty=format:%s"], cwd)
+        .unwrap_or_else(|| "No commits yet".to_string());
 
-    // Get the last commit author
-    let last_commit_author = run_git(
-        &["log", "-1", "--pretty=format:%an"],
-        cwd,
-    )
-    .unwrap_or_else(|| "Unknown".to_string());
+    let last_commit_author = run_git(&["log", "-1", "--pretty=format:%an"], cwd)
+        .unwrap_or_else(|| "Unknown".to_string());
 
     Some(GitContext {
         branch,
@@ -94,13 +76,11 @@ fn gather_git_context(cwd: &PathBuf) -> Option<GitContext> {
     })
 }
 
-/// Run a git subcommand and return its trimmed stdout.
-/// Returns None if git isn't found, the command fails, or we're not in a repo.
 fn run_git(args: &[&str], cwd: &PathBuf) -> Option<String> {
     let output = Command::new("git")
         .args(args)
         .current_dir(cwd)
-        .stderr(std::process::Stdio::null()) // silence "not a git repo" noise
+        .stderr(std::process::Stdio::null())
         .output();
 
     match output {
@@ -122,12 +102,9 @@ fn run_git(args: &[&str], cwd: &PathBuf) -> Option<String> {
     }
 }
 
-// ─── TODO count ─────────────────────────────────────────────────────────────
+// ─── TODO count ──────────────────────────────────────────────────────────────
 
-/// Quick TODO count for the context snapshot.
-/// Uses walkdir directly rather than calling the todos command
-/// so we keep the two commands independently testable.
-fn count_todos(cwd: &PathBuf) -> Option<usize> {
+pub fn count_todos(cwd: &PathBuf) -> Option<usize> {
     use walkdir::WalkDir;
 
     let tags = ["TODO", "FIXME", "HACK"];
@@ -142,7 +119,6 @@ fn count_todos(cwd: &PathBuf) -> Option<usize> {
             continue;
         }
 
-        // Skip non-source files and ignored dirs
         let path = entry.path();
         if is_ignored(path) {
             continue;
@@ -160,7 +136,7 @@ fn count_todos(cwd: &PathBuf) -> Option<usize> {
     Some(count)
 }
 
-fn is_ignored(path: &std::path::Path) -> bool {
+pub fn is_ignored(path: &std::path::Path) -> bool {
     path.components().any(|c| {
         matches!(
             c.as_os_str().to_str().unwrap_or(""),
@@ -171,7 +147,6 @@ fn is_ignored(path: &std::path::Path) -> bool {
 
 // ─── Session ─────────────────────────────────────────────────────────────────
 
-/// Build the session struct from gathered data.
 fn build_session(
     cwd: &PathBuf,
     git: Option<GitContext>,
@@ -183,7 +158,6 @@ fn build_session(
         .unwrap_or("unknown")
         .to_string();
 
-    // Timestamp without pulling in chrono — good enough for display
     let last_seen = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| format!("{}", d.as_secs()))
@@ -198,27 +172,22 @@ fn build_session(
     })
 }
 
-/// Save session as JSON to ~/.devpulse/<project_name>.json
-/// This is where NoHomeDir finally gets used.
 #[instrument(skip(session))]
-fn save_session(session: &ProjectSession) -> Result<()> {
+pub fn save_session(session: &ProjectSession) -> Result<()> {
     let home = home_dir().ok_or(DevpulseError::NoHomeDir)?;
     let store_dir = home.join(".devpulse");
 
-    // Create ~/.devpulse/ if it doesn't exist yet
     fs::create_dir_all(&store_dir).map_err(DevpulseError::Io)?;
 
     let file_path = store_dir.join(format!("{}.json", session.project_name));
     let json = serde_json::to_string_pretty(session)?;
 
     fs::write(&file_path, json).map_err(DevpulseError::Io)?;
-
     debug!(path = %file_path.display(), "Session saved");
     Ok(())
 }
 
-/// Load a previous session for this project if one exists.
-/// Returns None silently if no session found — first run is fine.
+/// Load a previous session — used by `devpulse all` to show last seen time
 pub fn load_session(project_name: &str) -> Option<ProjectSession> {
     let home = home_dir()?;
     let file_path = home
@@ -237,8 +206,7 @@ pub fn load_session(project_name: &str) -> Option<ProjectSession> {
 
 // ─── Display ─────────────────────────────────────────────────────────────────
 
-fn print_context(session: &ProjectSession) {
-    // Git section
+pub fn print_context(session: &ProjectSession) {
     match &session.git {
         None => {
             println!("  {}  {}", "◆".dimmed(), "Not a git repository".dimmed());
@@ -264,7 +232,6 @@ fn print_context(session: &ProjectSession) {
         }
     }
 
-    // TODO count
     if let Some(count) = session.todo_count {
         let label = if count == 0 {
             "No TODOs found".green().to_string()
@@ -273,10 +240,9 @@ fn print_context(session: &ProjectSession) {
                 .yellow()
                 .to_string()
         };
-        println!("  {}  {}", "◆ TODOs".bold(), label);
+        println!("  {}    {}", "◆ TODOs".bold(), label);
     }
 
-    // Session saved hint
     println!();
     println!(
         "  {}",
