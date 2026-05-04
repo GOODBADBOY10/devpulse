@@ -5,12 +5,8 @@ use std::process::Command;
 use std::time::Instant;
 use tracing::{debug, info, instrument, warn};
 
-// How long we wait for a tool before giving up.
-// A hanging `docker` call (e.g. on a cold daemon) would freeze the whole app
-// without this guard.
 const TOOL_TIMEOUT_SECS: u64 = 5;
 
-/// Everything we know about one check after it runs.
 #[derive(Debug)]
 pub struct CheckResult {
     pub label: String,
@@ -19,16 +15,12 @@ pub struct CheckResult {
     pub duration_ms: u128,
 }
 
-/// Explicit enum — not a bare bool — so future arms (Warn, Skip) are easy to add.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum CheckStatus {
     Pass,
     Fail,
 }
 
-/// Entry point called from main.
-/// Returns Err only for truly unexpected failures (e.g. can't read cwd).
-/// Individual tool-not-found results are encoded as CheckStatus::Fail, not errors.
 #[instrument(name = "health_check")]
 pub fn run() -> Result<()> {
     info!("Starting health check");
@@ -51,54 +43,43 @@ pub fn run() -> Result<()> {
     if passed == total {
         println!("{}", "Your environment looks healthy!".green().bold());
     } else {
-        let failed = total - passed;
-        println!("{}", format!("{} issue(s) need attention.", failed).yellow().bold());
+        println!(
+            "{}",
+            format!("{} issue(s) need attention.", total - passed).yellow().bold()
+        );
     }
 
     println!();
-
     info!(passed, total, "Health check complete");
     Ok(())
 }
 
-/// Run every check and collect results.
-/// Separated from `run()` so it is independently testable.
-fn collect_checks() -> Result<Vec<CheckResult>> {
-    let checks = vec![
+pub fn collect_checks() -> Result<Vec<CheckResult>> {
+    Ok(vec![
         check_tool("Rust", "rustc"),
         check_tool("Cargo", "cargo"),
         check_tool("Git", "git"),
         check_tool("Node.js", "node"),
         check_tool("Docker", "docker"),
         check_env_file()?,
-    ];
-    Ok(checks)
+    ])
 }
 
 /// Probe a binary by running `<binary> --version`.
-///
-/// We treat a missing binary as a CheckStatus::Fail (expected failure),
-/// not as a DevpulseError (unexpected/programmer error). This means callers
-/// never need to handle "tool not found" as an exception.
-///
-/// A per-call timeout prevents a slow daemon (e.g. Docker on first start)
-/// from stalling the whole health check.
+/// Falls back to stderr if stdout is empty (fixes Docker on some systems).
 #[instrument(skip_all, fields(binary))]
-fn check_tool(label: &str, binary: &str) -> CheckResult {
+pub fn check_tool(label: &str, binary: &str) -> CheckResult {
     debug!(binary, "Probing tool");
     let start = Instant::now();
 
-    // Build the child process but do NOT use .unwrap().
-    // Command::new never panics — it only fails when we call .output() / .spawn().
     let result = Command::new(binary)
         .arg("--version")
-        // Silence stderr so tool error messages don't bleed into our output
-        .stderr(std::process::Stdio::null())
+        // Capture stderr too so Docker's version output is never lost
+        .stderr(std::process::Stdio::piped())
         .output();
 
     let duration_ms = start.elapsed().as_millis();
 
-    // Warn in the log if a tool is slow; the user only sees the formatted line.
     if duration_ms > (TOOL_TIMEOUT_SECS * 1000) as u128 {
         warn!(binary, duration_ms, "Tool probe exceeded timeout threshold");
     }
@@ -114,7 +95,6 @@ fn check_tool(label: &str, binary: &str) -> CheckResult {
             }
         }
         Err(e) => {
-            // Unexpected OS error (permissions, etc.) — still a Fail, but log it
             warn!(binary, error = %e, "Unexpected error probing tool");
             CheckResult {
                 label: label.to_string(),
@@ -124,9 +104,14 @@ fn check_tool(label: &str, binary: &str) -> CheckResult {
             }
         }
         Ok(output) => {
-            // Validate UTF-8 explicitly instead of silently replacing bad bytes.
-            // A garbled version string is a signal something is wrong with the binary.
-            match String::from_utf8(output.stdout) {
+            // Try stdout first; fall back to stderr (Docker writes version to stderr)
+            let raw = if !output.stdout.is_empty() {
+                output.stdout
+            } else {
+                output.stderr
+            };
+
+            match String::from_utf8(raw) {
                 Err(_) => {
                     warn!(binary, "Tool produced non-UTF-8 output");
                     CheckResult {
@@ -136,13 +121,24 @@ fn check_tool(label: &str, binary: &str) -> CheckResult {
                         duration_ms,
                     }
                 }
-                Ok(stdout) => {
-                    let version = stdout
+                Ok(out) => {
+                    let version = out
                         .lines()
                         .next()
-                        .unwrap_or("unknown version") // safe: only None on empty string
+                        .unwrap_or("unknown version")
                         .trim()
                         .to_string();
+
+                    // If still empty after fallback, mark as fail with a clear message
+                    if version.is_empty() {
+                        warn!(binary, "Tool returned empty version string");
+                        return CheckResult {
+                            label: label.to_string(),
+                            status: CheckStatus::Fail,
+                            message: format!("{} returned an empty version — it may not be installed correctly", binary),
+                            duration_ms,
+                        };
+                    }
 
                     debug!(binary, version = %version, "Tool found");
                     CheckResult {
@@ -157,16 +153,8 @@ fn check_tool(label: &str, binary: &str) -> CheckResult {
     }
 }
 
-/// Check for a .env file in the current working directory.
-///
-/// Returns Err only if we cannot determine the cwd — a genuine IO failure.
-/// Missing .env is a CheckStatus::Fail, not an error.
-#[instrument]
-fn check_env_file() -> Result<CheckResult> {
+pub fn check_env_file() -> Result<CheckResult> {
     let start = Instant::now();
-
-    // Use std::env::current_dir() instead of a hardcoded relative path so
-    // the check is correct no matter where the binary is invoked from.
     let cwd = std::env::current_dir().map_err(DevpulseError::Io)?;
     let env_path = cwd.join(".env");
 
@@ -187,7 +175,6 @@ fn check_env_file() -> Result<CheckResult> {
     })
 }
 
-/// Format and print one check line.
 fn print_check(check: &CheckResult) {
     let icon = match check.status {
         CheckStatus::Pass => "✔".green().bold(),
@@ -201,7 +188,6 @@ fn print_check(check: &CheckResult) {
         CheckStatus::Fail => check.message.yellow().to_string(),
     };
 
-    // Show duration only when DEVPULSE_DEBUG is set — not noise for normal users
     let duration_hint = if std::env::var("DEVPULSE_DEBUG").is_ok() {
         format!(" ({}ms)", check.duration_ms).dimmed().to_string()
     } else {
@@ -209,4 +195,101 @@ fn print_check(check: &CheckResult) {
     };
 
     println!("  {}  {}  {}{}", icon, label, message, duration_hint);
+}
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    // ── check_tool ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_check_tool_finds_existing_binary() {
+        // `git` is always available in CI and dev environments
+        let result = check_tool("Git", "git");
+        assert_eq!(result.status, CheckStatus::Pass);
+        assert!(!result.message.is_empty());
+    }
+
+    #[test]
+    fn test_check_tool_fails_for_missing_binary() {
+        let result = check_tool("Fake", "this-binary-does-not-exist-devpulse");
+        assert_eq!(result.status, CheckStatus::Fail);
+        assert!(result.message.contains("not found"));
+    }
+
+    #[test]
+    fn test_check_tool_label_is_preserved() {
+        let result = check_tool("MyLabel", "git");
+        assert_eq!(result.label, "MyLabel");
+    }
+
+    #[test]
+    fn test_check_tool_duration_is_recorded() {
+        let result = check_tool("Git", "git");
+        // Duration should be >= 0 (it always will be, but this confirms the field exists)
+        assert!(result.duration_ms < 10_000); // sanity: should finish in under 10s
+    }
+
+    // ── check_env_file ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_check_env_file_passes_when_env_exists() {
+        let dir = TempDir::new().unwrap();
+        let env_path = dir.path().join(".env");
+        fs::write(&env_path, "DATABASE_URL=postgres://localhost/mydb\n").unwrap();
+
+        // Temporarily change working directory to the temp dir
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let result = check_env_file().unwrap();
+        assert_eq!(result.status, CheckStatus::Pass);
+        assert!(result.message.contains(".env"));
+
+        std::env::set_current_dir(original).unwrap();
+    }
+
+    #[test]
+    fn test_check_env_file_fails_when_env_missing() {
+        let dir = TempDir::new().unwrap();
+
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let result = check_env_file().unwrap();
+        assert_eq!(result.status, CheckStatus::Fail);
+        assert!(result.message.contains("No .env"));
+
+        std::env::set_current_dir(original).unwrap();
+    }
+
+    // ── collect_checks ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_collect_checks_returns_six_checks() {
+        let checks = collect_checks().unwrap();
+        assert_eq!(checks.len(), 6);
+    }
+
+    #[test]
+    fn test_collect_checks_has_expected_labels() {
+        let checks = collect_checks().unwrap();
+        let labels: Vec<&str> = checks.iter().map(|c| c.label.as_str()).collect();
+        assert!(labels.contains(&"Rust"));
+        assert!(labels.contains(&"Git"));
+        assert!(labels.contains(&"Docker"));
+        assert!(labels.contains(&".env file"));
+    }
+
+    // ── CheckStatus ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_check_status_pass_is_not_fail() {
+        assert_ne!(CheckStatus::Pass, CheckStatus::Fail);
+    }
 }
