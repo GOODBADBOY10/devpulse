@@ -3,7 +3,7 @@ use colored::Colorize;
 use dirs::home_dir;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{debug, info, instrument, warn};
 
@@ -148,7 +148,8 @@ pub fn is_ignored(path: &std::path::Path) -> bool {
 // ─── Session ─────────────────────────────────────────────────────────────────
 
 fn build_session(
-    cwd: &PathBuf,
+    // cwd: &PathBuf,
+    cwd: &Path,
     git: Option<GitContext>,
     todo_count: Option<usize>,
 ) -> Result<ProjectSession> {
