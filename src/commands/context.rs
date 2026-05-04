@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{debug, info, instrument, warn};
 
-// ─── Data structures ────────────────────────────────────────────────────────
+// ─── Data structures ─────────────────
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProjectSession {
