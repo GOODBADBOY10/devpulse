@@ -76,7 +76,7 @@ Every developer knows the feeling — you switch back to a project after a few d
 ### From crates.io (recommended)
 
 ```bash
-cargo install devpulse
+cargo install devpulse-cli
 ```
 
 ### From source

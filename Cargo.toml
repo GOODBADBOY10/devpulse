@@ -1,5 +1,5 @@
 [package]
-name = "devpulse"
+name = "devpulse-cli"
 version = "0.1.0"
 edition = "2024"
 description = "Your developer environment companion — health checks, TODO scanner, and project context"
