@@ -7,16 +7,13 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, info, instrument, warn};
 use walkdir::WalkDir;
 
-/// Tags we scan for. Easy to extend later.
 const TODO_TAGS: &[&str] = &["TODO", "FIXME", "HACK", "NOTE", "XXX"];
 
-/// File extensions we care about. Avoids scanning binaries, lock files, etc.
 const ALLOWED_EXTENSIONS: &[&str] = &[
     "rs", "ts", "js", "tsx", "jsx", "py", "go", "java", "c", "cpp", "h",
     "cs", "rb", "php", "swift", "kt", "toml", "yaml", "yml", "md",
 ];
 
-/// One found TODO entry
 #[derive(Debug)]
 pub struct TodoEntry {
     pub tag: String,
@@ -24,12 +21,10 @@ pub struct TodoEntry {
     pub text: String,
 }
 
-/// Entry point called from main
 #[instrument(name = "todos_scan", skip(path))]
 pub fn run(path: &str) -> Result<()> {
     let scan_path = PathBuf::from(path);
 
-    // Validate the path exists before doing any work
     if !scan_path.exists() {
         return Err(DevpulseError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
@@ -42,7 +37,6 @@ pub fn run(path: &str) -> Result<()> {
     println!("\n{}", "devpulse todos scan".bold().underline());
     println!("{}\n", format!("Scanning {}...", scan_path.display()).dimmed());
 
-    // BTreeMap keeps files sorted alphabetically — nicer output
     let results = scan_directory(&scan_path)?;
 
     if results.is_empty() {
@@ -57,8 +51,7 @@ pub fn run(path: &str) -> Result<()> {
 
     println!(
         "{}",
-        format!("Found {} TODO(s) across {} file(s)", total_todos, total_files)
-            .bold()
+        format!("Found {} TODO(s) across {} file(s)", total_todos, total_files).bold()
     );
     println!();
 
@@ -66,40 +59,32 @@ pub fn run(path: &str) -> Result<()> {
     Ok(())
 }
 
-/// Walk the directory recursively and collect all TODOs.
-/// Returns a map of file path → list of entries.
 #[instrument(skip(root))]
-fn scan_directory(root: &Path) -> Result<BTreeMap<String, Vec<TodoEntry>>> {
+pub fn scan_directory(root: &Path) -> Result<BTreeMap<String, Vec<TodoEntry>>> {
     let mut results: BTreeMap<String, Vec<TodoEntry>> = BTreeMap::new();
 
     for entry in WalkDir::new(root)
-        .follow_links(false)   // don't follow symlinks — avoids infinite loops
+        .follow_links(false)
         .into_iter()
-        .filter_map(|e| {
-            match e {
-                Ok(entry) => Some(entry),
-                Err(err) => {
-                    // Log permission errors etc. but keep scanning
-                    warn!(error = %err, "Could not access entry, skipping");
-                    None
-                }
+        .filter_map(|e| match e {
+            Ok(entry) => Some(entry),
+            Err(err) => {
+                warn!(error = %err, "Could not access entry, skipping");
+                None
             }
         })
     {
-        // Skip directories — we only want files
         if !entry.file_type().is_file() {
             continue;
         }
 
         let file_path = entry.path();
 
-        // Skip files with extensions we don't care about
         if !is_allowed_file(file_path) {
-            debug!(path = %file_path.display(), "Skipping file (extension not allowed)");
+            debug!(path = %file_path.display(), "Skipping file");
             continue;
         }
 
-        // Skip hidden directories like .git, node_modules, target
         if is_ignored_path(file_path) {
             debug!(path = %file_path.display(), "Skipping ignored path");
             continue;
@@ -107,20 +92,18 @@ fn scan_directory(root: &Path) -> Result<BTreeMap<String, Vec<TodoEntry>>> {
 
         match scan_file(file_path) {
             Ok(entries) if !entries.is_empty() => {
-                // Make the path relative to the root for cleaner output
                 let display_path = file_path
                     .strip_prefix(root)
                     .unwrap_or(file_path)
                     .display()
                     .to_string();
 
-                debug!(path = %display_path, count = entries.len(), "Found TODOs in file");
+                debug!(path = %display_path, count = entries.len(), "Found TODOs");
                 results.insert(display_path, entries);
             }
-            Ok(_) => {} // file had no TODOs — skip silently
+            Ok(_) => {}
             Err(e) => {
-                // Unreadable file — log and continue rather than aborting the whole scan
-                warn!(path = %file_path.display(), error = %e, "Could not read file, skipping");
+                warn!(path = %file_path.display(), error = %e, "Could not read file");
             }
         }
     }
@@ -128,9 +111,7 @@ fn scan_directory(root: &Path) -> Result<BTreeMap<String, Vec<TodoEntry>>> {
     Ok(results)
 }
 
-/// Scan a single file line by line and return all TODO entries found.
-#[instrument(skip(path))]
-fn scan_file(path: &Path) -> Result<Vec<TodoEntry>> {
+pub fn scan_file(path: &Path) -> Result<Vec<TodoEntry>> {
     let file = File::open(path).map_err(DevpulseError::Io)?;
     let reader = BufReader::new(file);
     let mut entries = Vec::new();
@@ -139,18 +120,11 @@ fn scan_file(path: &Path) -> Result<Vec<TodoEntry>> {
         let line = match line_result {
             Ok(l) => l,
             Err(e) => {
-                // A single unreadable line shouldn't abort the whole file
-                warn!(
-                    path = %path.display(),
-                    line = index + 1,
-                    error = %e,
-                    "Could not read line, skipping"
-                );
+                warn!(path = %path.display(), line = index + 1, error = %e, "Could not read line");
                 continue;
             }
         };
 
-        // Check if this line contains any of our tracked tags
         if let Some(entry) = extract_todo(&line, index + 1) {
             entries.push(entry);
         }
@@ -159,24 +133,13 @@ fn scan_file(path: &Path) -> Result<Vec<TodoEntry>> {
     Ok(entries)
 }
 
-/// Parse a single line and extract a TodoEntry if a tag is found.
-/// Only matches tags that appear inside comments, not string literals.
-/// Handles formats like:
-///   // TODO: fix this
-///   # FIXME some issue
-///   /* HACK: workaround */
-fn extract_todo(line: &str, line_number: usize) -> Option<TodoEntry> {
+pub fn extract_todo(line: &str, line_number: usize) -> Option<TodoEntry> {
     let trimmed = line.trim();
-
-    // Only consider the part of the line that is inside a comment.
-    // We detect comment starts for common styles: //, #, <!--, /*
-    // If no comment marker is found, the line cannot contain a valid TODO.
     let comment_start = find_comment_start(trimmed)?;
     let comment_text = &trimmed[comment_start..];
 
     for &tag in TODO_TAGS {
         if let Some(pos) = comment_text.find(tag) {
-            // Ensure the tag is a whole word — not e.g. "TODOS" or "NOTABLE"
             let after_tag = &comment_text[pos + tag.len()..];
             let is_word_boundary = after_tag
                 .chars()
@@ -192,7 +155,6 @@ fn extract_todo(line: &str, line_number: usize) -> Option<TodoEntry> {
                 .trim_start_matches(':')
                 .trim_start_matches('-')
                 .trim()
-                // Strip trailing comment closers like */
                 .trim_end_matches("*/")
                 .trim()
                 .to_string();
@@ -208,32 +170,26 @@ fn extract_todo(line: &str, line_number: usize) -> Option<TodoEntry> {
     None
 }
 
-/// Find the index where a comment starts in a line.
-/// Returns None if no comment marker is detected.
-fn find_comment_start(line: &str) -> Option<usize> {
-    // Order matters: check longer markers before shorter ones
+pub fn find_comment_start(line: &str) -> Option<usize> {
+    if line.starts_with("///") {
+        return Some(3);
+    }
     for marker in &["//", "/*", "<!--", "# ", "##"] {
         if let Some(pos) = line.find(marker) {
             return Some(pos + marker.len());
         }
     }
-    // Also handle lines that are pure doc comments (start with ///)
-    if line.starts_with("///") {
-        return Some(3);
-    }
     None
 }
 
-/// Check if a file extension is in our allowed list
-fn is_allowed_file(path: &Path) -> bool {
+pub fn is_allowed_file(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| ALLOWED_EXTENSIONS.contains(&ext))
         .unwrap_or(false)
 }
 
-/// Skip common directories that should never be scanned
-fn is_ignored_path(path: &Path) -> bool {
+pub fn is_ignored_path(path: &Path) -> bool {
     path.components().any(|component| {
         matches!(
             component.as_os_str().to_str().unwrap_or(""),
@@ -242,7 +198,6 @@ fn is_ignored_path(path: &Path) -> bool {
     })
 }
 
-/// Print all results grouped by file
 fn print_results(results: &BTreeMap<String, Vec<TodoEntry>>) {
     for (file_path, entries) in results {
         println!("  {}", file_path.cyan().bold());
@@ -252,7 +207,7 @@ fn print_results(results: &BTreeMap<String, Vec<TodoEntry>>) {
                 "FIXME" => entry.tag.red().bold(),
                 "HACK"  => entry.tag.yellow().bold(),
                 "XXX"   => entry.tag.red().bold(),
-                _       => entry.tag.blue().bold(), // TODO, NOTE
+                _       => entry.tag.blue().bold(),
             };
 
             let line_num = format!("line {:<5}", entry.line_number).dimmed();
@@ -265,5 +220,282 @@ fn print_results(results: &BTreeMap<String, Vec<TodoEntry>>) {
         }
 
         println!();
+    }
+}
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    // ── extract_todo ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_extract_todo_finds_basic_todo() {
+        let result = extract_todo("    // TODO: fix this", 1);
+        assert!(result.is_some());
+        let entry = result.unwrap();
+        assert_eq!(entry.tag, "TODO");
+        assert_eq!(entry.text, "fix this");
+        assert_eq!(entry.line_number, 1);
+    }
+
+    #[test]
+    fn test_extract_todo_finds_fixme() {
+        let result = extract_todo("    // FIXME: this panics on empty input", 5);
+        assert!(result.is_some());
+        let entry = result.unwrap();
+        assert_eq!(entry.tag, "FIXME");
+        assert_eq!(entry.text, "this panics on empty input");
+    }
+
+    #[test]
+    fn test_extract_todo_finds_hack() {
+        let result = extract_todo("// HACK: workaround for slow API", 10);
+        assert!(result.is_some());
+        let entry = result.unwrap();
+        assert_eq!(entry.tag, "HACK");
+        assert_eq!(entry.text, "workaround for slow API");
+    }
+
+    #[test]
+    fn test_extract_todo_finds_note() {
+        let result = extract_todo("// NOTE: this is intentional", 3);
+        assert!(result.is_some());
+        let entry = result.unwrap();
+        assert_eq!(entry.tag, "NOTE");
+        assert_eq!(entry.text, "this is intentional");
+    }
+
+    #[test]
+    fn test_extract_todo_ignores_string_literal() {
+        // "TODO" inside a string is NOT in a comment — should be ignored
+        let result = extract_todo("    let label = \"TODO\";", 1);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_todo_ignores_plain_code_line() {
+        let result = extract_todo("    let x = 42;", 1);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_todo_does_not_match_todos_word() {
+        // "TODOS" should NOT match the "TODO" tag (word boundary check)
+        let result = extract_todo("// TODOS are important", 1);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_todo_handles_no_colon() {
+        // TODO without colon should still be found
+        let result = extract_todo("// TODO fix this later", 1);
+        assert!(result.is_some());
+        let entry = result.unwrap();
+        assert_eq!(entry.tag, "TODO");
+        assert_eq!(entry.text, "fix this later");
+    }
+
+    #[test]
+    fn test_extract_todo_handles_hash_comment() {
+        // Python / YAML style comments
+        let result = extract_todo("# TODO: refactor this", 1);
+        assert!(result.is_some());
+        let entry = result.unwrap();
+        assert_eq!(entry.tag, "TODO");
+        assert_eq!(entry.text, "refactor this");
+    }
+
+    #[test]
+    fn test_extract_todo_handles_block_comment() {
+        let result = extract_todo("/* TODO: clean up */", 1);
+        assert!(result.is_some());
+        let entry = result.unwrap();
+        assert_eq!(entry.tag, "TODO");
+        // Trailing */ should be stripped
+        assert_eq!(entry.text, "clean up");
+    }
+
+    #[test]
+    fn test_extract_todo_empty_text_after_tag() {
+        let result = extract_todo("// TODO", 1);
+        assert!(result.is_some());
+        let entry = result.unwrap();
+        assert_eq!(entry.tag, "TODO");
+        assert_eq!(entry.text, "");
+    }
+
+    // ── find_comment_start ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_find_comment_start_slash_slash() {
+        let pos = find_comment_start("// some comment");
+        assert!(pos.is_some());
+    }
+
+    #[test]
+    fn test_find_comment_start_hash() {
+        let pos = find_comment_start("# some comment");
+        assert!(pos.is_some());
+    }
+
+    #[test]
+    fn test_find_comment_start_no_comment() {
+        let pos = find_comment_start("let x = 5;");
+        assert!(pos.is_none());
+    }
+
+    #[test]
+    fn test_find_comment_start_doc_comment() {
+        let pos = find_comment_start("/// doc comment");
+        assert!(pos.is_some());
+    }
+
+    // ── is_allowed_file ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_is_allowed_file_rust() {
+        assert!(is_allowed_file(Path::new("main.rs")));
+    }
+
+    #[test]
+    fn test_is_allowed_file_typescript() {
+        assert!(is_allowed_file(Path::new("app.ts")));
+    }
+
+    #[test]
+    fn test_is_allowed_file_rejects_lock_file() {
+        assert!(!is_allowed_file(Path::new("Cargo.lock")));
+    }
+
+    #[test]
+    fn test_is_allowed_file_rejects_binary() {
+        assert!(!is_allowed_file(Path::new("devpulse")));
+    }
+
+    #[test]
+    fn test_is_allowed_file_rejects_no_extension() {
+        assert!(!is_allowed_file(Path::new("Makefile")));
+    }
+
+    // ── is_ignored_path ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_is_ignored_path_node_modules() {
+        assert!(is_ignored_path(Path::new("project/node_modules/lib/index.js")));
+    }
+
+    #[test]
+    fn test_is_ignored_path_target() {
+        assert!(is_ignored_path(Path::new("project/target/debug/main")));
+    }
+
+    #[test]
+    fn test_is_ignored_path_git() {
+        assert!(is_ignored_path(Path::new("project/.git/config")));
+    }
+
+    #[test]
+    fn test_is_ignored_path_allows_src() {
+        assert!(!is_ignored_path(Path::new("project/src/main.rs")));
+    }
+
+    // ── scan_file ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_scan_file_finds_todos_in_real_file() {
+        // Write a temp file with known TODOs and verify scan_file finds them
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("test.rs");
+
+        fs::write(
+            &file_path,
+            r#"
+fn main() {
+    // TODO: implement this
+    let x = 1;
+    // FIXME: this is broken
+    let y = 2; // HACK: shortcut
+}
+"#,
+        )
+        .unwrap();
+
+        let entries = scan_file(&file_path).unwrap();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].tag, "TODO");
+        assert_eq!(entries[1].tag, "FIXME");
+        assert_eq!(entries[2].tag, "HACK");
+    }
+
+    #[test]
+    fn test_scan_file_empty_file_returns_no_entries() {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("empty.rs");
+        fs::write(&file_path, "").unwrap();
+
+        let entries = scan_file(&file_path).unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_scan_file_clean_file_returns_no_entries() {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("clean.rs");
+        fs::write(&file_path, "fn main() {\n    println!(\"hello\");\n}\n").unwrap();
+
+        let entries = scan_file(&file_path).unwrap();
+        assert!(entries.is_empty());
+    }
+
+    // ── scan_directory ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_scan_directory_finds_todos_recursively() {
+        let dir = TempDir::new().unwrap();
+
+        // Create a nested structure
+        let sub = dir.path().join("src");
+        fs::create_dir(&sub).unwrap();
+
+        fs::write(sub.join("main.rs"), "// TODO: top level\n").unwrap();
+        fs::write(sub.join("lib.rs"), "fn clean() {}\n").unwrap();
+
+        let results = scan_directory(dir.path()).unwrap();
+        assert_eq!(results.len(), 1); // only main.rs has a TODO
+        assert!(results.keys().any(|k| k.contains("main.rs")));
+    }
+
+    #[test]
+    fn test_scan_directory_skips_ignored_dirs() {
+        let dir = TempDir::new().unwrap();
+
+        // Put a TODO inside node_modules — should be skipped
+        let ignored = dir.path().join("node_modules");
+        fs::create_dir(&ignored).unwrap();
+        fs::write(ignored.join("lib.js"), "// TODO: inside ignored dir\n").unwrap();
+
+        // Put a real TODO in src
+        let src = dir.path().join("src");
+        fs::create_dir(&src).unwrap();
+        fs::write(src.join("app.rs"), "// TODO: real todo\n").unwrap();
+
+        let results = scan_directory(dir.path()).unwrap();
+
+        // Should find the src TODO but NOT the node_modules one
+        assert_eq!(results.len(), 1);
+        assert!(results.keys().any(|k| k.contains("app.rs")));
+        assert!(!results.keys().any(|k| k.contains("node_modules")));
+    }
+
+    #[test]
+    fn test_scan_directory_empty_dir_returns_empty() {
+        let dir = TempDir::new().unwrap();
+        let results = scan_directory(dir.path()).unwrap();
+        assert!(results.is_empty());
     }
 }
