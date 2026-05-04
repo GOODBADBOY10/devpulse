@@ -10,8 +10,8 @@ use walkdir::WalkDir;
 const TODO_TAGS: &[&str] = &["TODO", "FIXME", "HACK", "NOTE", "XXX"];
 
 const ALLOWED_EXTENSIONS: &[&str] = &[
-    "rs", "ts", "js", "tsx", "jsx", "py", "go", "java", "c", "cpp", "h",
-    "cs", "rb", "php", "swift", "kt", "toml", "yaml", "yml", "md",
+    "rs", "ts", "js", "tsx", "jsx", "py", "go", "java", "c", "cpp", "h", "cs", "rb", "php",
+    "swift", "kt", "toml", "yaml", "yml", "md",
 ];
 
 #[derive(Debug)]
@@ -35,7 +35,10 @@ pub fn run(path: &str) -> Result<()> {
     info!(path = %scan_path.display(), "Starting TODO scan");
 
     println!("\n{}", "devpulse todos scan".bold().underline());
-    println!("{}\n", format!("Scanning {}...", scan_path.display()).dimmed());
+    println!(
+        "{}\n",
+        format!("Scanning {}...", scan_path.display()).dimmed()
+    );
 
     let results = scan_directory(&scan_path)?;
 
@@ -51,7 +54,11 @@ pub fn run(path: &str) -> Result<()> {
 
     println!(
         "{}",
-        format!("Found {} TODO(s) across {} file(s)", total_todos, total_files).bold()
+        format!(
+            "Found {} TODO(s) across {} file(s)",
+            total_todos, total_files
+        )
+        .bold()
     );
     println!();
 
@@ -205,9 +212,9 @@ fn print_results(results: &BTreeMap<String, Vec<TodoEntry>>) {
         for entry in entries {
             let tag_colored = match entry.tag.as_str() {
                 "FIXME" => entry.tag.red().bold(),
-                "HACK"  => entry.tag.yellow().bold(),
-                "XXX"   => entry.tag.red().bold(),
-                _       => entry.tag.blue().bold(),
+                "HACK" => entry.tag.yellow().bold(),
+                "XXX" => entry.tag.red().bold(),
+                _ => entry.tag.blue().bold(),
             };
 
             let line_num = format!("line {:<5}", entry.line_number).dimmed();
@@ -386,7 +393,9 @@ mod tests {
 
     #[test]
     fn test_is_ignored_path_node_modules() {
-        assert!(is_ignored_path(Path::new("project/node_modules/lib/index.js")));
+        assert!(is_ignored_path(Path::new(
+            "project/node_modules/lib/index.js"
+        )));
     }
 
     #[test]

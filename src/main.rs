@@ -4,7 +4,7 @@ mod error;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use tracing::error;
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 #[derive(Parser)]
 #[command(
@@ -120,19 +120,10 @@ fn run_all(path: &str) -> error::Result<()> {
 }
 
 fn section_header(step: &str, title: &str) {
-    println!(
-        "\n  {} {}",
-        format!("[{}]", step).dimmed(),
-        title.bold()
-    );
+    println!("\n  {} {}", format!("[{}]", step).dimmed(), title.bold());
     println!("  {}", "───────────────────────".dimmed());
 }
 
 fn print_section_error(section: &str, e: &dyn std::error::Error) {
-    eprintln!(
-        "  {} {} failed: {}",
-        "⚠".yellow(),
-        section.bold(),
-        e
-    );
+    eprintln!("  {} {} failed: {}", "⚠".yellow(), section.bold(), e);
 }

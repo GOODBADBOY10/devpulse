@@ -31,21 +31,29 @@ pub fn run() -> Result<()> {
     let checks = collect_checks()?;
 
     let total = checks.len();
-    let passed = checks.iter().filter(|c| matches!(c.status, CheckStatus::Pass)).count();
+    let passed = checks
+        .iter()
+        .filter(|c| matches!(c.status, CheckStatus::Pass))
+        .count();
 
     for check in &checks {
         print_check(check);
     }
 
     println!();
-    println!("{}", format!("Result: {}/{} checks passed", passed, total).bold());
+    println!(
+        "{}",
+        format!("Result: {}/{} checks passed", passed, total).bold()
+    );
 
     if passed == total {
         println!("{}", "Your environment looks healthy!".green().bold());
     } else {
         println!(
             "{}",
-            format!("{} issue(s) need attention.", total - passed).yellow().bold()
+            format!("{} issue(s) need attention.", total - passed)
+                .yellow()
+                .bold()
         );
     }
 
@@ -135,7 +143,10 @@ pub fn check_tool(label: &str, binary: &str) -> CheckResult {
                         return CheckResult {
                             label: label.to_string(),
                             status: CheckStatus::Fail,
-                            message: format!("{} returned an empty version — it may not be installed correctly", binary),
+                            message: format!(
+                                "{} returned an empty version — it may not be installed correctly",
+                                binary
+                            ),
                             duration_ms,
                         };
                     }
@@ -165,7 +176,11 @@ pub fn check_env_file() -> Result<CheckResult> {
 
     Ok(CheckResult {
         label: ".env file".to_string(),
-        status: if exists { CheckStatus::Pass } else { CheckStatus::Fail },
+        status: if exists {
+            CheckStatus::Pass
+        } else {
+            CheckStatus::Fail
+        },
         message: if exists {
             format!("Found at {}", env_path.display())
         } else {
