@@ -301,7 +301,7 @@ mod tests {
         assert_eq!(result.status, CheckStatus::Fail);
         assert!(result.message.contains("No .env"));
     }
-    
+
     // ── collect_checks ───────────────────────────────────────────────────────
 
     #[test]
