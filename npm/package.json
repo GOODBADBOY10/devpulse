@@ -1,18 +1,23 @@
 {
-  "name": "devpulse-cli",
+  "name": "devpulse-tool",
   "version": "0.1.0",
   "description": "Your developer environment companion",
   "bin": {
-    "devpulse": "./run.js"
+    "devpulse": "run.js"
   },
   "scripts": {
     "postinstall": "node install.js"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/GOODBADBOY10/devpulse"
+    "url": "git+https://github.com/GOODBADBOY10/devpulse.git"
   },
-  "keywords": ["cli", "developer-tools", "todo", "rust"],
+  "keywords": [
+    "cli",
+    "developer-tools",
+    "todo",
+    "rust"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">=16"
