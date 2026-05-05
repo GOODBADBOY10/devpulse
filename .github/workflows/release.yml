@@ -9,8 +9,28 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Step 1 — Create the GitHub release first
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: devpulse ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+
+  # Step 2 — Build binaries and upload to the release
   build:
     name: Build ${{ matrix.target }}
+    needs: create-release
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
