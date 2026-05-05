@@ -164,14 +164,44 @@ pub fn check_tool(label: &str, binary: &str) -> CheckResult {
     }
 }
 
+// pub fn check_env_file() -> Result<CheckResult> {
+//     let start = Instant::now();
+//     let cwd = std::env::current_dir().map_err(DevpulseError::Io)?;
+//     let env_path = cwd.join(".env");
+
+//     debug!(path = %env_path.display(), "Checking for .env");
+
+//     let exists = Path::new(&env_path).exists();
+//     let duration_ms = start.elapsed().as_millis();
+
+//     Ok(CheckResult {
+//         label: ".env file".to_string(),
+//         status: if exists {
+//             CheckStatus::Pass
+//         } else {
+//             CheckStatus::Fail
+//         },
+//         message: if exists {
+//             format!("Found at {}", env_path.display())
+//         } else {
+//             format!("No .env found in {}", cwd.display())
+//         },
+//         duration_ms,
+//     })
+// }
+
 pub fn check_env_file() -> Result<CheckResult> {
     let start = Instant::now();
     let cwd = std::env::current_dir().map_err(DevpulseError::Io)?;
-    let env_path = cwd.join(".env");
+    check_env_file_in(&cwd, start)
+}
 
+// Testable version that accepts an explicit path
+pub fn check_env_file_in(dir: &Path, start: Instant) -> Result<CheckResult> {
+    let env_path = dir.join(".env");
     debug!(path = %env_path.display(), "Checking for .env");
 
-    let exists = Path::new(&env_path).exists();
+    let exists = env_path.exists();
     let duration_ms = start.elapsed().as_millis();
 
     Ok(CheckResult {
@@ -184,7 +214,7 @@ pub fn check_env_file() -> Result<CheckResult> {
         message: if exists {
             format!("Found at {}", env_path.display())
         } else {
-            format!("No .env found in {}", cwd.display())
+            format!("No .env found in {}", dir.display())
         },
         duration_ms,
     })
@@ -255,34 +285,23 @@ mod tests {
     #[test]
     fn test_check_env_file_passes_when_env_exists() {
         let dir = TempDir::new().unwrap();
-        let env_path = dir.path().join(".env");
-        fs::write(&env_path, "DATABASE_URL=postgres://localhost/mydb\n").unwrap();
+        fs::write(dir.path().join(".env"), "DATABASE_URL=postgres://\n").unwrap();
 
-        // Temporarily change working directory to the temp dir
-        let original = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
-
-        let result = check_env_file().unwrap();
+        // No more set_current_dir — pass the path directly
+        let result = check_env_file_in(dir.path(), Instant::now()).unwrap();
         assert_eq!(result.status, CheckStatus::Pass);
         assert!(result.message.contains(".env"));
-
-        std::env::set_current_dir(original).unwrap();
     }
 
     #[test]
     fn test_check_env_file_fails_when_env_missing() {
         let dir = TempDir::new().unwrap();
 
-        let original = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
-
-        let result = check_env_file().unwrap();
+        let result = check_env_file_in(dir.path(), Instant::now()).unwrap();
         assert_eq!(result.status, CheckStatus::Fail);
         assert!(result.message.contains("No .env"));
-
-        std::env::set_current_dir(original).unwrap();
     }
-
+    
     // ── collect_checks ───────────────────────────────────────────────────────
 
     #[test]
